@@ -7,11 +7,11 @@
 
 // Filters Paths - All connected perfectly to the repository structures
 #include "Filters/Gray_scale_filter.cpp"
-#include "Filters/BW_filter.cpp"
+#include "Filters/black_and_white.cpp"
 #include "Filters/Darken-lighten_filter.cpp"
 #include "Filters/Infrared_filter.cpp"
 #include "Filters/Flip_filter.cpp"
-#include "Filters/Rotate_filter.cpp"
+#include "Filters/Rotate.cpp"
 #include "Filters/Add_frame_filter.cpp"
 #include "Filters/Invert_filter.cpp"
 #include "Filters/Blur_filter.cpp"
