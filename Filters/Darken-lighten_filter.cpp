@@ -1,5 +1,5 @@
 #include<iostream>
-#include"Image_Class.h"
+#include"../Libraries/Image_Class.h"
 using namespace std;
 
 void darken_lighten_filter(Image &image){
