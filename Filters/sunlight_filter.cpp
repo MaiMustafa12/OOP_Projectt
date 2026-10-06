@@ -6,11 +6,20 @@ void sunlight_filter(Image&image) {
         for (int j = 0;j < image.height;j++) {
             for (int k = 0;k < image.channels;k++) {
                 int value = image(i, j, k);
-                value = value + 50;
-                if (value > 255) {
-                    value = 255;
+                if (k == 0) {
+                    value = value + 60;
                 }
-                image(i, j, k) = value;
+                else if (k == 1) {
+                    value = value + 30;
+                }
+                else if (k == 2) {
+                    value = value - 20;
+                }
+                if (value > 255)
+                    value = 255;
+                if (value < 0)
+                    value = 0;
+                image(i, j, k )=value;
             }
         }
     }
