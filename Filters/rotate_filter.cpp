@@ -1,3 +1,8 @@
+#include <iostream>
+#include "../Libraries/Image_Class.h"
+using namespace std;
+
+
 void rotate_filter(Image &image)
 {
     int angle;
