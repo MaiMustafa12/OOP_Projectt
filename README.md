@@ -1,54 +1,32 @@
-<p align="center">
-  <img src="https://shields.io" alt="Course Badge">
-  <img src="https://shields.io" alt="Level Badge">
-  <img src="https://shields.io" alt="Status Badge">
-</p>
+# RGBit - Advanced Image Processor
 
-<h1 align="center">📸 RGBit - Advanced Image Processor</h1>
-
-<p align="center">
-  <strong>A High-Performance Core Computer Vision & Image Editing Pipeline built from scratch using C++</strong><br>
-  Developed as part of the academic course requirements for <b>CS213: Object-Oriented Programming (2026-2027)</b> under the supervision of the Faculty of Computers and Artificial Intelligence, Cairo University (FCAI-CU).
-</p>
-
-<p align="center">
-  <img src="https://unsplash.com" alt="Coding Banner" width="100%" style="border-radius: 8px;">
-</p>
+A comprehensive Image Processing desktop application built using C++. Developed as part of the academic course requirements for **CS213 (Object-Oriented Programming)** under the supervision of the Faculty of Computers and Artificial Intelligence, Cairo University (FCAI-CU).
 
 ---
 
-## 🚀 System Features & Filter Capabilities
+## Features and Filter Capabilities
 
-Our system architecture processes pixel matrices across various image formats including `.png`, `.jpg`, `.jpeg`, and `.bmp`. The filters are strategically grouped below:
+Our system architecture processes pixel matrices across various image formats including `.png`, `.jpg`, `.jpeg`, and `.bmp`. The filters are strategically grouped below to match the project requirements:
 
-### 🎨 1. Core Color Adjustments
+### 1. Color Filters
+* **Grayscale Conversion** - Transforms full-color images into clean grayscale values using luminance averaging.
+* **Black and White Thresholding** - Converts images into binary monochrome based on brightness threshold levels.
+* **Darken and Lighten Image** - Allows full control over brightness exposure scales from 0% to 100%.
+* **Invert Image Colors** - Reverses pixel RGB spectra to generate classic photographic negatives.
 
-| Filter Indicator | Function Name | Operational Mechanism | Development Layer |
-| :---: | :--- | :--- | :---: |
-| 🔴 **Filter 1** | `grayscale_filter` | Luminance spectrum matrix averaging | Core Layer |
-| ⚫ **Filter 2** | `BW_filter` | Binary monochrome brightness thresholding | Core Layer |
-| 🔆 **Filter 3** | `darken_lighten_filter` | Pixel channel values scaling [-100%, 100%] | Core Layer |
-| 🔄 **Filter 8** | `invert_filter` | Photo-negative spectral reversal (`255 - RGB`) | Core Layer |
+### 2. Transformation Filters
+* **Image Flipping** - Full capability for both horizontal and vertical axis mirror transformations.
+* **Image Rotation** - High-precision geometric rotation clockwise by 90°, 180°, or 270°.
+* **Image Resizing** - Precise scaling via new absolute pixel dimensions or percentage-based scaling ratios.
 
-### 🔄 2. Geometric Transformations
-
-| Filter Indicator | Function Name | Operational Mechanism | Development Layer |
-| :---: | :--- | :--- | :---: |
-| ↔️ **Filter 5** | `flip_filter` | Horizontal and Vertical axis mirror reflections | Transformation Layer |
-| 🔄 **Filter 6** | `rotate_filter` | High-precision clockwise pixel grid rotation (90°/180°/270°) | Transformation Layer |
-| 📐 **Filter 7** | `resize_filter` | Coordinate scaling based on new absolute dimensions or percentage ratio | Transformation Layer |
-
-### 🔮 3. Special Effects & Filters (Beast Level)
-
-| Filter Indicator | Function Name | Operational Mechanism | Development Layer |
-| :---: | :--- | :--- | :---: |
-| 🖼️ **Filter 4** | `add_frame_filter` | Structural perimeter padding with 6 interactive color channels | Advanced Layer |
-| 🌫️ **Filter 12** | `blur_filter` | Gaussian-like neighborhood average matrix computation | Advanced Layer |
-| 🔥 **Filter 16** | `infrared_filter` | Thermal spectra rendering via custom red channel amplification | Advanced Layer |
+### 3. Effect Filters (Advanced Level)
+* **Add Frame Boundary** - Dynamically paints solid graphical borders with fully interactive custom frame thickness and custom color options.
+* **Gaussian Blur Filter** - Blurs and filters out image detail using custom neighborhood pixel calculations.
+* **Infrared Photography** - Replicates infrared samurai-photography spectra using tailored pixel adjustments.
 
 ---
 
-## 🛠️ Repository & Project Structure
+## Project Structure
 
 The project codebases are managed under a strict directory separation layer to enforce modular compiler build optimization:
 
@@ -75,9 +53,9 @@ ImageProcessor/
 
 ---
 
-## 💻 Compilation & Operational Setup
+## Compilation and Setup
 
-### System Prerequisites
+### Prerequisites
 A generic compiler layer supporting **C++17** specifications (`g++ v9.0+` or `clang`).
 
 ### Build Execution Commands
@@ -93,10 +71,6 @@ A generic compiler layer supporting **C++17** specifications (`g++ v9.0+` or `cl
 
 ---
 
-## 📜 Academic Acknowledgments & References
-* **Supervising Professor:** Dr. Mohammad El-Ramly (FCAI-CU)
+## Academic Acknowledgments
+* **Course Instructor:** Dr. Mohammad El-Ramly (FCAI-CU)
 * **Underlying Pixel Loader Utilities:** Handed over by `stb` architectural single-header frameworks.
-
----
-## 📄 Project Framework Licensing
-Licensed solely under standard academic usage rules. Open for continuous revision increments until Milestone Part 2 validation.
