@@ -5,7 +5,7 @@
 
 // Filters
 //#include "Filters/Grayscale_filter.cpp"
-//#include "Filters/BW_filter.cpp"
+#include "Filters/black_and_white.cpp.cpp"
 #include "Filters/Darken-lighten_filter.cpp"
 //#include "Filters/Infrared_filter.cpp"
 //#include "Filters/Flip_filter.cpp"
