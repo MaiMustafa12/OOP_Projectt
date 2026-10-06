@@ -1,17 +1,21 @@
 #include <iostream>
 #include <string>
+#include <algorithm>
+#include <fstream>
 
 #include "Libraries/Image_Class.h"
 
-// Filters
-//#include "Filters/Grayscale_filter.cpp"
-#include "Filters/black_and_white.cpp.cpp"
+// Filters Paths - All connected perfectly to the repository structures
+#include "Filters/Gray_scale_filter.cpp"
+#include "Filters/BW_filter.cpp"
 #include "Filters/Darken-lighten_filter.cpp"
-//#include "Filters/Infrared_filter.cpp"
-//#include "Filters/Flip_filter.cpp"
-//#include "Filters/Rotate_filter.cpp"
-//#include "Filters/Add_frame_filter.cpp"
+#include "Filters/Infrared_filter.cpp"
+#include "Filters/Flip_filter.cpp"
+#include "Filters/Rotate_filter.cpp"
+#include "Filters/Add_frame_filter.cpp"
 #include "Filters/Invert_filter.cpp"
+#include "Filters/Blur_filter.cpp"
+#include "Filters/Resize_filter.cpp"
 
 using namespace std;
 
@@ -39,6 +43,8 @@ int main()
     cout << "6 => Rotate" << endl;
     cout << "7 => Add Frame" << endl;
     cout << "8 => Inverted" << endl;
+    cout << "12 => Blur" << endl;
+    cout << "14 => Resize" << endl;
 
     cin >> choice;
 
@@ -73,6 +79,14 @@ int main()
     else if (choice == 8)
     {
         invert_filter(image);
+    }
+    else if (choice == 12)
+    {
+        blur_filter(image);
+    }
+    else if (choice == 14)
+    {
+        resize_filter(image);
     }
     else
     {
@@ -126,3 +140,9 @@ int main()
     }
 
     // Save automatically inside Images folder
+    string outputPath = "Images/" + newImageName + extension;
+    image.saveImage(outputPath);
+
+    cout << "Image saved successfully inside Images folder!" << endl;
+    return 0;
+}
