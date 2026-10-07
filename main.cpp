@@ -17,7 +17,6 @@
 #include "Filters/Blur_filter.cpp"
 #include "Filters/Resize_filter.cpp"
 #include "Filters/detect_image_edges_filter.cpp"
-
 using namespace std;
 
 int main()
@@ -44,6 +43,7 @@ int main()
     cout << "6 => Rotate" << endl;
     cout << "7 => Add Frame" << endl;
     cout << "8 => Inverted" << endl;
+    cout << "10 => detect edges" << endl;
     cout << "12 => Blur" << endl;
     cout << "14 => Resize" << endl;
 
@@ -79,11 +79,12 @@ int main()
     }
     else if (choice == 8)
     {
-        detect_edges_filter(image);
+          blur_filter(image);
     }
     else if (choice == 10)
     {
-        blur_filter(image);
+        detect_edges_filter(image);
+    
     }
     else if (choice == 12)
     {
