@@ -16,7 +16,8 @@
 #include "Filters/Invert_filter.cpp"
 #include "Filters/Blur_filter.cpp"
 #include "Filters/Resize_filter.cpp"
-#include "detect_image_edges_filter.cpp"
+#include "Filters/detect_image_edges_filter.cpp"
+
 using namespace std;
 
 int main()
