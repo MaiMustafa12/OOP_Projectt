@@ -54,7 +54,7 @@ int main()
     }
     else if (choice == 2)
     {
-        BW_filter(image);
+        black_and_white_filter(image);
     }
     else if (choice == 3)
     {
@@ -78,7 +78,11 @@ int main()
     }
     else if (choice == 8)
     {
-        invert_filter(image);
+        detect_edges_filter(image);
+    }
+    else if (choice == 10)
+    {
+        blur_filter(image);
     }
     else if (choice == 12)
     {
