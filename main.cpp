@@ -6,46 +6,71 @@
 #include "Libraries/Image_Class.h"
 
 // Filters Paths - All connected perfectly to the repository structures
-#include "Filters/Gray_scale_filter.cpp"
+#include "Filters/detect_image_edges_filter.cpp"
+#include "Filters/Flip_filter.cpp"
+#include "Filters/Invert_filter.cpp"
 #include "Filters/black_and_white_filter.cpp"
+#include "Filters/Gray_scale_filter.cpp"
+#include "Filters/Add_frame_filter.cpp"
+#include "Filters/Blur_filter.cpp"
+#include "Filters/crop_filter.cpp"
 #include "Filters/Darken-lighten_filter.cpp"
 #include "Filters/Infrared_filter.cpp"
-#include "Filters/Flip_filter.cpp"
-#include "Filters/rotate_filter.cpp"
-#include "Filters/Add_frame_filter.cpp"
-#include "Filters/Invert_filter.cpp"
-#include "Filters/Blur_filter.cpp"
+#include "Filters/merge_filter.cpp"
+#include "Filters/purple_filter.cpp"
 #include "Filters/Resize_filter.cpp"
-#include "Filters/detect_image_edges_filter.cpp"
+#include "Filters/rotate_filter.cpp"
+#include "Filters/sunlight_filter.cpp"
+#include "Filters/TV_filter.cpp"
 using namespace std;
 
 int main()
 {
     string imageName;
+    string imagePath;
     int choice;
+    Image image;
 
-    // Choose image
+// Choose image
+
+while (true)
+{
     cout << "Choose image: ";
     cin >> imageName;
 
-    // Image is inside Images folder
-    string imagePath = "Images/" + imageName;
+    imagePath = "Images/" + imageName;
 
-    Image image(imagePath);
+    try
+    {
+        image.loadNewImage(imagePath);
+        break;
+    }
+    catch (...)
+    {
+        cout << "Image not found!" << endl;
+        cout << "Try again." << endl;
+    }
+}
 
     // Choose filter
     cout << "Choose filter:" << endl;
+
     cout << "1 => Grayscale" << endl;
     cout << "2 => Black and White" << endl;
-    cout << "3 => Darken / Lighten" << endl;
-    cout << "4 => Infrared" << endl;
+    cout << "3 => Inverted" << endl;
+    cout << "4 => Add Frame" << endl;
     cout << "5 => Flip" << endl;
     cout << "6 => Rotate" << endl;
-    cout << "7 => Add Frame" << endl;
-    cout << "8 => Inverted" << endl;
+    cout << "7 =>: Darken and Lighten Image" << endl;
+    cout << "8 => Resize" << endl;
+    cout << "9 => Merge Images" << endl;
     cout << "10 => detect edges" << endl;
+    cout << "11 => Crop Image" << endl;
     cout << "12 => Blur" << endl;
-    cout << "14 => Resize" << endl;
+    cout << "13 => Sunlight" << endl;
+    cout << "14 => old TV filter" << endl;
+    cout << "15 => purple" << endl;
+    cout << "16 => Infrared" << endl;
 
     cin >> choice;
 
@@ -59,11 +84,11 @@ int main()
     }
     else if (choice == 3)
     {
-        darken_lighten_filter(image);
+        invert_filter (image);
     }
     else if (choice == 4)
     {
-        infrared_filter(image);
+        add_frame_filter(image);
     }
     else if (choice == 5)
     {
@@ -75,24 +100,43 @@ int main()
     }
     else if (choice == 7)
     {
-        add_frame_filter(image);
+        darken_lighten_filter(image);
     }
     else if (choice == 8)
     {
-          blur_filter(image);
+        resize_filter(image);
+    }
+    else if (choice == 9)
+    {
+        merge_filter(image);
     }
     else if (choice == 10)
     {
         detect_edges_filter(image);
-    
+    }
+    else if (choice == 11)
+    {
+        crop_filter(image);
     }
     else if (choice == 12)
     {
         blur_filter(image);
     }
+    else if (choice == 13)
+    {
+        sunlight_filter(image);
+    }
     else if (choice == 14)
     {
-        resize_filter(image);
+        TV_filter(image);
+    }
+     else if (choice == 15)
+    {
+        purple_filter(image);
+    }
+    else if (choice == 16)
+    {
+        infrared_filter(image);
     }
     else
     {
