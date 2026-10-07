@@ -1,11 +1,12 @@
 #include <iostream>
 #include "../Libraries/Image_Class.h"
+#include "Filters/Gray_scale_filter.cpp"
 using namespace std;
 
 void detect_edges_filter(Image &image)
 {
 // turn pic to grey
-#include "Filters/Gray_scale_filter.cpp"
+    grayscale_filter(image);
 // detect edges
 int max_diff = 30 ;
 for ( int i=0; i< image.width ; i++ ) {
