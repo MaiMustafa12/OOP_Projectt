@@ -2,7 +2,7 @@
 #include "../Libraries/Image_Class.h"
 using namespace std;
 
-void BW_filter(Image &image){
+void black_and_white_filter(Image &image){
 
     string option;
     double level;
