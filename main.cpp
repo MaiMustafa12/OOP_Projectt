@@ -21,6 +21,9 @@
 #include "Filters/rotate_filter.cpp"
 #include "Filters/sunlight_filter.cpp"
 #include "Filters/TV_filter.cpp"
+#include "Filters/merge_filter.cpp"
+#include "Filters/skew_filter.cpp"
+#include "Filters/Oil_painting_filter.cpp"
 using namespace std;
 
 int main()
@@ -77,6 +80,9 @@ int main()
     cout << "13 => old TV filter" << endl;
     cout << "14 => purple" << endl;
     cout << "15 => Infrared" << endl;
+    cout << "16 => Merge Images" << endl;
+    cout << "17 => Skew Image" << endl;
+    cout << "18 => Oil Painting" << endl;
 
     cin >> choice;
 
@@ -139,6 +145,18 @@ int main()
     else if (choice == 15)
     {
         infrared_filter(image);
+    }
+    else if (choice == 16)
+    {
+        merge_filter(image);
+    }
+    else if (choice == 17)
+    {
+        skew_filter(image);
+    }
+    else if (choice == 18)
+    {
+        oil_painting_filter(image);
     }
     else
     {
