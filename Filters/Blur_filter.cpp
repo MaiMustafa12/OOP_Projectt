@@ -2,6 +2,7 @@
 
 void blur_filter(Image &image)
 {
+    if (image.width < 5 || image.height < 5) return;
     Image temp = image;
     for (int i = 2; i < image.width - 2; ++i)
     {
