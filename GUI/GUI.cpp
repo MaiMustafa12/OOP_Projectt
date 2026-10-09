@@ -63,6 +63,9 @@
 #include "../Filters/rotate_filter.cpp"
 #include "../Filters/sunlight_filter.cpp"
 #include "../Filters/TV_filter.cpp"
+#include "../Filters/Oil_painting_filter.cpp"
+#include "../Filters/merge_filter.cpp"
+#include "../Filters/skew_filter.cpp"
 
 // -------------------------------------------------------------
 // Control IDs
@@ -93,6 +96,9 @@ enum ControlIDs {
     ID_FILTER_TV,
     ID_FILTER_PURPLE,
     ID_FILTER_EDGES,
+    ID_FILTER_OIL_PAINTING,
+    ID_FILTER_MERGE,
+    ID_FILTER_SKEW,
 
     // Slider Controls
     ID_SLIDER_INTENSITY,
@@ -116,7 +122,8 @@ enum FilterType {
     FILTER_SUNLIGHT,
     FILTER_TV,
     FILTER_PURPLE,
-    FILTER_EDGES
+    FILTER_EDGES,
+    FILTER_OIL_PAINTING
 };
 
 // -------------------------------------------------------------
@@ -126,6 +133,29 @@ Image originalImage;              ///< Original loaded image (BEFORE image, alwa
 Image currentImage;               ///< Currently displayed image (AFTER image)
 Image baseImageBeforeFilter;      ///< Base state right before active filter was selected
 Image fullyFilteredImage;         ///< 100% filtered version used for instant linear alpha-blending
+
+// Fast preview caches: pixel-format conversion is done only when an image changes,
+// not every time Windows repaints the window or the mouse moves.
+struct PreviewBufferCache {
+    const unsigned char* data = nullptr;
+    int width = 0;
+    int height = 0;
+    std::vector<unsigned char> bgr;
+    void clear() { data = nullptr; width = height = 0; bgr.clear(); }
+};
+PreviewBufferCache originalPreviewCache;
+PreviewBufferCache currentPreviewCache;
+
+void InvalidatePreviewCaches() {
+    originalPreviewCache.clear();
+    currentPreviewCache.clear();
+}
+
+// AFTER changes after edits; BEFORE is immutable until a new image is opened.
+// Do not rebuild the original preview buffer for every filter/slider update.
+void InvalidateCurrentPreviewCache() {
+    currentPreviewCache.clear();
+}
 bool  hasImageLoaded = false;     ///< True if an image has been successfully loaded
 
 std::vector<Image> undoStack;     ///< Stack of previous image states for Undo
@@ -147,6 +177,14 @@ HWND hAfterLabel = NULL;
 RECT rectBeforeArea = { 42, 88, 468, 414 };
 RECT rectAfterArea  = { 522, 88, 948, 414 };
 
+// Merge overlay interaction: drag the second image over AFTER to choose overlap.
+bool mergeDragMode = false;
+bool mergeDragActive = false;
+Image mergeSecondImage;
+POINT mergeDragStartScreen = {0, 0};
+int mergeOffsetX = 0, mergeOffsetY = 0;
+int mergeStartOffsetX = 0, mergeStartOffsetY = 0;
+
 // Free-crop interaction state: drag directly over the AFTER preview.
 bool freeCropMode = false;
 bool freeCropDragging = false;
@@ -156,7 +194,7 @@ std::vector<std::pair<HWND, RECT>> baseChildLayouts;
 bool childLayoutsCaptured = false;
 HWND layoutParent = NULL;
 const int DESIGN_CLIENT_WIDTH = 1010;
-const int DESIGN_CLIENT_HEIGHT = 660;
+const int DESIGN_CLIENT_HEIGHT = 700;
 
 BOOL CALLBACK CaptureChildLayout(HWND child, LPARAM) {
     RECT r;
@@ -227,14 +265,13 @@ void BlendImages(Image& out, const Image& base, const Image& filtered, int inten
     }
 
     out = base;
-    for (int i = 0; i < out.width; ++i) {
-        for (int j = 0; j < out.height; ++j) {
-            for (int k = 0; k < out.channels; ++k) {
-                int bVal = base(i, j, k);
-                int fVal = filtered(i, j, k);
-                out(i, j, k) = (unsigned char)((1.0 - alpha) * bVal + alpha * fVal);
-            }
-        }
+    const size_t byteCount = static_cast<size_t>(out.width) * out.height * out.channels;
+    unsigned char* dst = out.imageData;
+    const unsigned char* srcBase = base.imageData;
+    const unsigned char* srcFiltered = filtered.imageData;
+    // Raw contiguous buffers avoid repeated bounds checks in Image::operator().
+    for (size_t i = 0; i < byteCount; ++i) {
+        dst[i] = static_cast<unsigned char>((1.0 - alpha) * srcBase[i] + alpha * srcFiltered[i]);
     }
 }
 
@@ -281,17 +318,38 @@ void RenderImageFit(HDC hdc, const Image& img, const RECT& targetRect) {
     int destX = targetRect.left + (boxW - destW) / 2;
     int destY = targetRect.top + (boxH - destH) / 2;
 
-    int rowStride = (img.width * 3 + 3) & ~3;
-    std::vector<unsigned char> bgrBuffer(rowStride * img.height);
+    const int rowStride = (img.width * 3 + 3) & ~3;
+    PreviewBufferCache* cache = nullptr;
+    if (&img == &originalImage) cache = &originalPreviewCache;
+    else if (&img == &currentImage) cache = &currentPreviewCache;
 
-    for (int y = 0; y < img.height; y++) {
-        int dibRow = img.height - 1 - y;
-        unsigned char* dstRow = &bgrBuffer[dibRow * rowStride];
-        for (int x = 0; x < img.width; x++) {
-            dstRow[x * 3 + 0] = img(x, y, 2); // Blue
-            dstRow[x * 3 + 1] = img(x, y, 1); // Green
-            dstRow[x * 3 + 2] = img(x, y, 0); // Red
+    std::vector<unsigned char> temporaryBuffer;
+    const unsigned char* bgrData = nullptr;
+
+    // Main BEFORE/AFTER images use a reusable cache. Merge preview images are
+    // temporary, so they get a local conversion buffer.
+    if (cache && cache->data == img.imageData &&
+        cache->width == img.width && cache->height == img.height &&
+        cache->bgr.size() == static_cast<size_t>(rowStride) * img.height) {
+        bgrData = cache->bgr.data();
+    } else {
+        std::vector<unsigned char>& buffer = cache ? cache->bgr : temporaryBuffer;
+        buffer.assign(static_cast<size_t>(rowStride) * img.height, 0);
+        for (int y = 0; y < img.height; ++y) {
+            unsigned char* dstRow = &buffer[static_cast<size_t>(img.height - 1 - y) * rowStride];
+            const unsigned char* srcRow = img.imageData + static_cast<size_t>(y) * img.width * img.channels;
+            for (int x = 0; x < img.width; ++x) {
+                dstRow[x * 3 + 0] = srcRow[x * img.channels + 2]; // Blue
+                dstRow[x * 3 + 1] = srcRow[x * img.channels + 1]; // Green
+                dstRow[x * 3 + 2] = srcRow[x * img.channels + 0]; // Red
+            }
         }
+        if (cache) {
+            cache->data = img.imageData;
+            cache->width = img.width;
+            cache->height = img.height;
+        }
+        bgrData = buffer.data();
     }
 
     BITMAPINFO bmi;
@@ -303,10 +361,10 @@ void RenderImageFit(HDC hdc, const Image& img, const RECT& targetRect) {
     bmi.bmiHeader.biBitCount = 24;
     bmi.bmiHeader.biCompression = BI_RGB;
 
-    SetStretchBltMode(hdc, HALFTONE);
+    SetStretchBltMode(hdc, COLORONCOLOR);
     StretchDIBits(hdc, destX, destY, destW, destH,
                   0, 0, img.width, img.height,
-                  bgrBuffer.data(), &bmi, DIB_RGB_COLORS, SRCCOPY);
+                  bgrData, &bmi, DIB_RGB_COLORS, SRCCOPY);
 }
 
 // -------------------------------------------------------------
@@ -335,6 +393,7 @@ void CommitCurrentFilter() {
 // Update Window Interface and Repaint Previews
 // -------------------------------------------------------------
 void RefreshGUI() {
+    InvalidateCurrentPreviewCache();
     if (hasImageLoaded) {
         std::wstring beforeInfo = L"BEFORE (Original): " +
             std::to_wstring(originalImage.width) + L" x " + std::to_wstring(originalImage.height) + L" px";
@@ -364,6 +423,7 @@ void UpdateLiveFilterIntensity() {
 
     // Instantly blend from the base image to the fully filtered version!
     BlendImages(currentImage, baseImageBeforeFilter, fullyFilteredImage, currentIntensity);
+    InvalidateCurrentPreviewCache();
     InvalidateRect(hMainWindow, NULL, FALSE);
 }
 
@@ -474,8 +534,10 @@ LRESULT CALLBACK PIXLatDialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
                     22, y, 150, 25, hwnd, NULL, NULL, NULL);
                 state->combo = CreateWindowW(L"COMBOBOX", L"",
                     WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
-                    180, y - 4, 210, 150, hwnd,
+                    180, y - 4, 440, 180, hwnd,
                     (HMENU)(INT_PTR)9300, NULL, NULL);
+                // Keep long option labels readable instead of clipping them in the dropdown.
+                SendMessageW(state->combo, CB_SETDROPPEDWIDTH, 440, 0);
                 for (const auto& option : state->comboOptions)
                     SendMessageW(state->combo, CB_ADDSTRING, 0, (LPARAM)option.c_str());
                 SendMessageW(state->combo, CB_SETCURSEL, state->selectedCombo, 0);
@@ -626,7 +688,7 @@ int PIXLatShowChoice(const std::wstring& title, const std::wstring& message,
 bool PIXLatShowForm(PIXLatDialogState& state) {
     int height = 100 + (int)state.fields.size() * 42;
     if (!state.comboOptions.empty()) height += 46;
-    return RunPIXLatDialog(state, 430, height + 65);
+    return RunPIXLatDialog(state, 660, height + 65);
 }
 
 
@@ -641,6 +703,105 @@ void TriggerSunlight()    { SetupLiveFilter(FILTER_SUNLIGHT, L"Sunlight", sunlig
 void TriggerTV()          { SetupLiveFilter(FILTER_TV, L"Old TV", TV_filter); }
 void TriggerPurple()      { SetupLiveFilter(FILTER_PURPLE, L"Purple", purple_filter); }
 void TriggerDetectEdges() { SetupLiveFilter(FILTER_EDGES, L"Detect Edges", detect_edges_filter); }
+void TriggerOilPainting() { SetupLiveFilter(FILTER_OIL_PAINTING, L"Oil Painting", oil_painting_filter); }
+
+Image LoadImageWithGDIPlus(const WCHAR* path);
+
+void ShowMergeDialog() {
+    if (!hasImageLoaded) return;
+    CommitCurrentFilter();
+
+    // Let the user browse to the second image from any folder, just like Open Image.
+    WCHAR secondFilename[MAX_PATH] = L"";
+    OPENFILENAMEW ofn;
+    ZeroMemory(&ofn, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hMainWindow;
+    ofn.lpstrTitle = L"Choose the second image to merge";
+    ofn.lpstrFilter = L"All Supported Images (*.png;*.jpg;*.jpeg;*.bmp;*.tga)\0*.png;*.jpg;*.jpeg;*.bmp;*.tga\0"
+                      L"PNG Image (*.png)\0*.png\0"
+                      L"JPEG Image (*.jpg;*.jpeg)\0*.jpg;*.jpeg\0"
+                      L"Bitmap Image (*.bmp)\0*.bmp\0"
+                      L"TGA Image (*.tga)\0*.tga\0"
+                      L"All Files (*.*)\0*.*\0";
+    ofn.lpstrFile = secondFilename;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+    ofn.lpstrInitialDir = L"Images";
+    if (!GetOpenFileNameW(&ofn)) return; // User cancelled file selection.
+
+    PIXLatDialogState dialog;
+    dialog.title = L"Merge Images";
+    dialog.message = L"1: Resize both images and blend.  2: Blend only the shared area.  3: Drag the second image to choose its position.";
+    dialog.comboLabel = L"Merge mode";
+    dialog.comboOptions = {
+        L"1. Resize both images, then blend",
+        L"2. Blend shared area only (smaller result)",
+        L"3. Drag second image to choose its position"
+    };
+    dialog.selectedCombo = 0;
+    if (!PIXLatShowForm(dialog)) return;
+
+    try {
+        // Use GDI+ with the full wide path so folders with spaces or Unicode work too.
+        Image secondImage = LoadImageWithGDIPlus(secondFilename);
+        if (dialog.selectedCombo == 2) {
+            mergeSecondImage = secondImage;
+            mergeOffsetX = std::max(0, (currentImage.width - secondImage.width) / 2);
+            mergeOffsetY = std::max(0, (currentImage.height - secondImage.height) / 2);
+            mergeDragMode = true;
+            mergeDragActive = false;
+            SetWindowTextW(hStatusLabel, L"Drag the image as many times as needed, then click Apply Changes. Press Esc to cancel.");
+            InvalidateRect(hMainWindow, NULL, FALSE);
+            return;
+        }
+
+        SaveStateForUndo();
+        merge_filter(currentImage, secondImage, dialog.selectedCombo == 0 ? 0 : 1);
+        activeFilter = FILTER_NONE;
+        currentIntensity = 100;
+        SendMessageW(hSliderIntensity, TBM_SETPOS, TRUE, 100);
+        SetWindowTextW(hLabelIntensity, L"100%");
+        SetWindowTextW(hLabelActiveFilter, L"Active Filter: (None)");
+        baseImageBeforeFilter = currentImage;
+        fullyFilteredImage = currentImage;
+        SetWindowTextW(hStatusLabel, L"Images merged successfully. BEFORE remains the original image.");
+        RefreshGUI();
+    } catch (const std::exception& e) {
+        std::wstring error = L"Could not load or merge the second image: " + StringToWString(e.what());
+        MessageBoxW(hMainWindow, error.c_str(), L"Merge Image Error", MB_OK | MB_ICONWARNING);
+    }
+}
+
+void ShowSkewDialog() {
+    if (!hasImageLoaded) return;
+    CommitCurrentFilter();
+
+    PIXLatDialogState dialog;
+    dialog.title = L"Skew Image";
+    dialog.message = L"Enter a skew angle between -45 and 45 degrees.";
+    dialog.fields = {{L"Angle (degrees)", L"15"}};
+    if (!PIXLatShowForm(dialog)) return;
+
+    double angle = 0.0;
+    try { angle = std::stod(dialog.fields[0].value); }
+    catch (...) {
+        MessageBoxW(hMainWindow, L"Enter a valid numeric angle.",
+                    L"Invalid Skew Angle", MB_OK | MB_ICONWARNING);
+        return;
+    }
+    if (angle < -45.0 || angle > 45.0) {
+        MessageBoxW(hMainWindow, L"Angle must be between -45 and 45 degrees.",
+                    L"Invalid Skew Angle", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    SaveStateForUndo();
+    skew_filter(currentImage, angle);
+    activeFilter = FILTER_NONE;
+    baseImageBeforeFilter = currentImage;
+    RefreshGUI();
+}
 
 void TriggerBW() {
     auto bwFunc = [](Image& img) { black_and_white_filter(img, 100.0); };
@@ -989,24 +1150,51 @@ Image LoadImageWithGDIPlus(const WCHAR* path) {
     if (bitmap.GetLastStatus() != Gdiplus::Ok) {
         throw std::runtime_error("Windows could not decode this image. Try a valid JPG, PNG, or BMP file.");
     }
-    UINT w = bitmap.GetWidth();
-    UINT h = bitmap.GetHeight();
+    const UINT w = bitmap.GetWidth();
+    const UINT h = bitmap.GetHeight();
     if (w == 0 || h == 0 || w > 20000 || h > 20000) {
         throw std::runtime_error("The image dimensions are invalid or too large.");
     }
+
+    Gdiplus::Rect rect(0, 0, static_cast<INT>(w), static_cast<INT>(h));
+    Gdiplus::BitmapData data;
+    if (bitmap.LockBits(&rect, Gdiplus::ImageLockModeRead, PixelFormat24bppRGB, &data) != Gdiplus::Ok) {
+        // Some formats cannot be locked directly as 24bpp. Convert once to a
+        // 24-bit bitmap, then read the raw bytes in one fast operation.
+        Gdiplus::Bitmap converted(static_cast<INT>(w), static_cast<INT>(h), PixelFormat24bppRGB);
+        Gdiplus::Graphics graphics(&converted);
+        graphics.DrawImage(&bitmap, 0, 0, static_cast<INT>(w), static_cast<INT>(h));
+        if (converted.GetLastStatus() != Gdiplus::Ok ||
+            converted.LockBits(&rect, Gdiplus::ImageLockModeRead, PixelFormat24bppRGB, &data) != Gdiplus::Ok) {
+            throw std::runtime_error("Could not read the selected image.");
+        }
+        Image loaded(static_cast<int>(w), static_cast<int>(h));
+        loaded.channels = 3;
+        for (UINT y = 0; y < h; ++y) {
+            const BYTE* row = static_cast<const BYTE*>(data.Scan0) + static_cast<ptrdiff_t>(y) * data.Stride;
+            for (UINT x = 0; x < w; ++x) {
+                unsigned char* dst = loaded.imageData + (static_cast<size_t>(y) * w + x) * 3;
+                dst[0] = row[x * 3 + 2];
+                dst[1] = row[x * 3 + 1];
+                dst[2] = row[x * 3 + 0];
+            }
+        }
+        converted.UnlockBits(&data);
+        return loaded;
+    }
+
     Image loaded(static_cast<int>(w), static_cast<int>(h));
     loaded.channels = 3;
     for (UINT y = 0; y < h; ++y) {
+        const BYTE* row = static_cast<const BYTE*>(data.Scan0) + static_cast<ptrdiff_t>(y) * data.Stride;
         for (UINT x = 0; x < w; ++x) {
-            Gdiplus::Color color;
-            if (bitmap.GetPixel(static_cast<INT>(x), static_cast<INT>(y), &color) != Gdiplus::Ok) {
-                throw std::runtime_error("Could not read a pixel from the selected image.");
-            }
-            loaded(static_cast<int>(x), static_cast<int>(y), 0) = color.GetR();
-            loaded(static_cast<int>(x), static_cast<int>(y), 1) = color.GetG();
-            loaded(static_cast<int>(x), static_cast<int>(y), 2) = color.GetB();
+            unsigned char* dst = loaded.imageData + (static_cast<size_t>(y) * w + x) * 3;
+            dst[0] = row[x * 3 + 2];
+            dst[1] = row[x * 3 + 1];
+            dst[2] = row[x * 3 + 0];
         }
     }
+    bitmap.UnlockBits(&data);
     return loaded;
 }
 
@@ -1018,20 +1206,54 @@ void SaveImageWithGDIPlus(const Image& img, const WCHAR* path, const WCHAR* mime
     if (bitmap.GetLastStatus() != Gdiplus::Ok) {
         throw std::runtime_error("Could not create the output image.");
     }
+
+    Gdiplus::Rect rect(0, 0, img.width, img.height);
+    Gdiplus::BitmapData data;
+    if (bitmap.LockBits(&rect, Gdiplus::ImageLockModeWrite, PixelFormat24bppRGB, &data) != Gdiplus::Ok) {
+        throw std::runtime_error("Could not prepare the output image.");
+    }
     for (int y = 0; y < img.height; ++y) {
+        BYTE* row = static_cast<BYTE*>(data.Scan0) + static_cast<ptrdiff_t>(y) * data.Stride;
+        const unsigned char* srcRow = img.imageData + static_cast<size_t>(y) * img.width * img.channels;
         for (int x = 0; x < img.width; ++x) {
-            Gdiplus::Color color(255, img(x, y, 0), img(x, y, 1), img(x, y, 2));
-            if (bitmap.SetPixel(x, y, color) != Gdiplus::Ok) {
-                throw std::runtime_error("Could not write pixels to the output image.");
-            }
+            row[x * 3 + 0] = srcRow[x * img.channels + 2]; // B
+            row[x * 3 + 1] = srcRow[x * img.channels + 1]; // G
+            row[x * 3 + 2] = srcRow[x * img.channels + 0]; // R
         }
     }
+    bitmap.UnlockBits(&data);
+
     CLSID encoder;
     if (GetEncoderClsid(mimeType, &encoder) < 0) {
         throw std::runtime_error("The selected image format is not available on this Windows installation.");
     }
     if (bitmap.Save(path, &encoder, nullptr) != Gdiplus::Ok) {
         throw std::runtime_error("Windows could not save the image to that location.");
+    }
+}
+
+// Keep the merge preview editable until the user clicks Apply Changes.
+void HandleApplyMergeOverlay() {
+    if (!mergeDragMode || !hasImageLoaded) return;
+
+    mergeDragMode = false;
+    mergeDragActive = false;
+    ReleaseCapture();
+    try {
+        SaveStateForUndo();
+        merge_filter(currentImage, mergeSecondImage, 2, mergeOffsetX, mergeOffsetY);
+        activeFilter = FILTER_NONE;
+        currentIntensity = 100;
+        SendMessageW(hSliderIntensity, TBM_SETPOS, TRUE, 100);
+        SetWindowTextW(hLabelIntensity, L"100%");
+        SetWindowTextW(hLabelActiveFilter, L"Active Filter: (None)");
+        baseImageBeforeFilter = currentImage;
+        fullyFilteredImage = currentImage;
+        SetWindowTextW(hStatusLabel, L"Merge applied. You can now click Save Image to save the result.");
+        RefreshGUI();
+    } catch (const std::exception& e) {
+        std::wstring error = L"Could not merge images: " + StringToWString(e.what());
+        MessageBoxW(hMainWindow, error.c_str(), L"Merge Error", MB_OK | MB_ICONERROR);
     }
 }
 
@@ -1062,6 +1284,7 @@ void HandleOpenImage() {
             Image loaded = LoadImageWithGDIPlus(filename);
             originalImage = loaded;
             currentImage = loaded;
+            InvalidatePreviewCaches();
             baseImageBeforeFilter = loaded;
             hasImageLoaded = true;
 
@@ -1189,9 +1412,25 @@ void HandleRedo() {
 void HandleClearFilters() {
     if (!hasImageLoaded) return;
     SaveStateForUndo();
-    CommitCurrentFilter();
-    currentImage = originalImage; // Restore AFTER image to original, keep BEFORE original unchanged
+
+    // Clear must also cancel an unfinished Merge overlay. Otherwise WM_PAINT
+    // keeps drawing mergeSecondImage over AFTER even after currentImage resets.
+    mergeDragMode = false;
+    mergeDragActive = false;
+    mergeSecondImage = Image();
+    ReleaseCapture();
+
+    // Reset any live filter state and its intensity as well.
+    activeFilter = FILTER_NONE;
+    currentIntensity = 100;
+    if (hSliderIntensity) SendMessageW(hSliderIntensity, TBM_SETPOS, TRUE, 100);
+    if (hLabelIntensity) SetWindowTextW(hLabelIntensity, L"100%");
+    if (hLabelActiveFilter) SetWindowTextW(hLabelActiveFilter, L"Active Filter: (None)");
+
+    currentImage = originalImage; // Restore AFTER to the original, including removing a merged image
     baseImageBeforeFilter = originalImage;
+    fullyFilteredImage = originalImage;
+    SetWindowTextW(hStatusLabel, L"Cleared all filters and unfinished merge. AFTER is back to the original image.");
     RefreshGUI();
 }
 
@@ -1351,11 +1590,23 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             CreateWindowW(L"BUTTON", L"Detect Edges", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
                 fx, fy2, fW, fH, hWnd, (HMENU)ID_FILTER_EDGES, NULL, NULL);
 
+            // Row 3: recently added filters
+            int fy3 = 583;
+            fx = 30;
+            CreateWindowW(L"BUTTON", L"Oil Painting", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+                fx, fy3, fW + 10, fH, hWnd, (HMENU)ID_FILTER_OIL_PAINTING, NULL, NULL);
+            fx += fW + 18;
+            CreateWindowW(L"BUTTON", L"Merge", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+                fx, fy3, fW, fH, hWnd, (HMENU)ID_FILTER_MERGE, NULL, NULL);
+            fx += fW + gap;
+            CreateWindowW(L"BUTTON", L"Skew", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+                fx, fy3, fW, fH, hWnd, (HMENU)ID_FILTER_SKEW, NULL, NULL);
+
             // Bottom instruction/status area: use a wrapping, left-aligned label with
             // enough height so longer guidance does not run into itself.
             hStatusLabel = CreateWindowW(L"STATIC", L"Ready. Open an image, choose a filter, then use Undo/Redo or Clear Filters.",
                 WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX,
-                30, 584, 930, 42, hWnd, NULL, NULL, NULL);
+                30, 625, 930, 42, hWnd, NULL, NULL, NULL);
 
             CaptureBaseChildLayouts(hWnd);
             return 0;
@@ -1388,6 +1639,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
         }
         case WM_KEYDOWN: {
+            if (wParam == VK_ESCAPE && mergeDragMode) {
+                mergeDragMode = false;
+                mergeDragActive = false;
+                ReleaseCapture();
+                SetWindowTextW(hStatusLabel, L"Merge overlay cancelled.");
+                InvalidateRect(hWnd, NULL, FALSE);
+                return 0;
+            }
+            if (wParam == VK_RETURN && mergeDragMode) {
+                HandleApplyMergeOverlay();
+                return 0;
+            }
             if (wParam == VK_ESCAPE && freeCropMode) {
                 freeCropMode = false;
                 freeCropDragging = false;
@@ -1400,6 +1663,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
         }
         case WM_LBUTTONDOWN: {
+            if (mergeDragMode && hasImageLoaded) {
+                POINT p = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+                RECT imageRect = GetFittedImageRect(currentImage, rectAfterArea);
+                if (PointInsideRect(p, imageRect)) {
+                    mergeDragActive = true;
+                    mergeDragStartScreen = p;
+                    mergeStartOffsetX = mergeOffsetX;
+                    mergeStartOffsetY = mergeOffsetY;
+                    SetCapture(hWnd);
+                }
+                return 0;
+            }
             if (freeCropMode && hasImageLoaded) {
                 POINT p = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
                 RECT imageRect = GetFittedImageRect(currentImage, rectAfterArea);
@@ -1416,6 +1691,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
         }
         case WM_MOUSEMOVE: {
+            if (mergeDragMode && mergeDragActive) {
+                POINT p = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+                RECT imageRect = GetFittedImageRect(currentImage, rectAfterArea);
+                int shownW = std::max(1, static_cast<int>(imageRect.right - imageRect.left));
+                int shownH = std::max(1, static_cast<int>(imageRect.bottom - imageRect.top));
+                int dx = p.x - mergeDragStartScreen.x;
+                int dy = p.y - mergeDragStartScreen.y;
+                mergeOffsetX = mergeStartOffsetX + (int)((long long)dx * currentImage.width / shownW);
+                mergeOffsetY = mergeStartOffsetY + (int)((long long)dy * currentImage.height / shownH);
+                InvalidateRect(hWnd, NULL, FALSE);
+                return 0;
+            }
             if (freeCropMode && freeCropDragging) {
                 freeCropEnd.x = GET_X_LPARAM(lParam);
                 freeCropEnd.y = GET_Y_LPARAM(lParam);
@@ -1426,6 +1713,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
         }
         case WM_LBUTTONUP: {
+            if (mergeDragMode && mergeDragActive) {
+                mergeDragActive = false;
+                ReleaseCapture();
+                SetWindowTextW(hStatusLabel, L"Position set temporarily. Keep dragging or click Apply Changes to confirm.");
+                InvalidateRect(hWnd, NULL, FALSE);
+                return 0;
+            }
             if (freeCropMode && freeCropDragging) {
                 freeCropEnd.x = GET_X_LPARAM(lParam);
                 freeCropEnd.y = GET_Y_LPARAM(lParam);
@@ -1445,7 +1739,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 case ID_BTN_UNDO:      HandleUndo(); break;
                 case ID_BTN_REDO:      HandleRedo(); break;
                 case ID_BTN_CLEAR:     HandleClearFilters(); break;
-                case ID_BTN_COMMIT:    HandleCommitFilter(); break;
+                case ID_BTN_COMMIT:    if (mergeDragMode) HandleApplyMergeOverlay(); else HandleCommitFilter(); break;
 
                 // Live Intensity Filters (All 0-100% Instant Real-Time)
                 case ID_FILTER_GRAYSCALE: TriggerGrayscale(); break;
@@ -1459,6 +1753,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 case ID_FILTER_TV:        TriggerTV(); break;
                 case ID_FILTER_PURPLE:    TriggerPurple(); break;
                 case ID_FILTER_EDGES:     TriggerDetectEdges(); break;
+                case ID_FILTER_OIL_PAINTING: TriggerOilPainting(); break;
+                case ID_FILTER_MERGE:     ShowMergeDialog(); break;
+                case ID_FILTER_SKEW:      ShowSkewDialog(); break;
                 case ID_FILTER_FRAME:     TriggerAddFrame(); break;
 
                 // Geometric Transformation Filters
@@ -1545,10 +1842,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             // Draw the real PIXLat logo asset (keep PIXLat_logo.png beside the project root).
             // GDI+ keeps the PNG alpha channel, so it blends into the purple header.
             {
-                Gdiplus::Image logoImage(L"PIXLat_logo.png");
+                static Gdiplus::Image logoImage(L"PIXLat_logo.png");
                 if (logoImage.GetLastStatus() == Gdiplus::Ok) {
                     Gdiplus::Graphics logoGraphics(memDC);
-                    logoGraphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+                    logoGraphics.SetInterpolationMode(Gdiplus::InterpolationModeLowQuality);
                     logoGraphics.DrawImage(&logoImage, 10 * uiScale, 2 * uiScale, 38 * uiScale, 38 * uiScale);
                 }
             }
@@ -1567,7 +1864,60 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
             // Draw BEFORE and AFTER image preview frames
             RenderImageFit(memDC, originalImage, rectBeforeArea);
-            RenderImageFit(memDC, currentImage, rectAfterArea);
+            if (mergeDragMode) {
+                // Drag preview is intentionally rendered at preview resolution, not
+                // full source resolution. This keeps mouse movement responsive even
+                // when the user loads multi-megapixel photographs. Apply still uses
+                // the full-resolution originals in HandleApplyMergeOverlay().
+                const RECT fitted = GetFittedImageRect(currentImage, rectAfterArea);
+                const int previewMaxW = std::max(1, static_cast<int>(fitted.right - fitted.left));
+                const int previewMaxH = std::max(1, static_cast<int>(fitted.bottom - fitted.top));
+                const double previewScale = std::min(1.0, std::min(
+                    static_cast<double>(previewMaxW) / currentImage.width,
+                    static_cast<double>(previewMaxH) / currentImage.height));
+                const int previewW = std::max(1, static_cast<int>(currentImage.width * previewScale));
+                const int previewH = std::max(1, static_cast<int>(currentImage.height * previewScale));
+                Image mergePreview(previewW, previewH);
+                const int previewOffsetX = static_cast<int>(mergeOffsetX * previewScale);
+                const int previewOffsetY = static_cast<int>(mergeOffsetY * previewScale);
+                const int secondPreviewW = std::max(1, static_cast<int>(mergeSecondImage.width * previewScale));
+                const int secondPreviewH = std::max(1, static_cast<int>(mergeSecondImage.height * previewScale));
+                for (int py = 0; py < previewH; ++py) {
+                    const int sourceY = std::min(currentImage.height - 1, static_cast<int>(py / previewScale));
+                    for (int px = 0; px < previewW; ++px) {
+                        const int sourceX = std::min(currentImage.width - 1, static_cast<int>(px / previewScale));
+                        for (int k = 0; k < 3; ++k)
+                            mergePreview(px, py, k) = currentImage(sourceX, sourceY, k);
+                    }
+                }
+                const int startX = std::max(0, previewOffsetX);
+                const int startY = std::max(0, previewOffsetY);
+                const int endX = std::min(previewW, previewOffsetX + secondPreviewW);
+                const int endY = std::min(previewH, previewOffsetY + secondPreviewH);
+                for (int py = startY; py < endY; ++py) {
+                    const int secondY = std::min(mergeSecondImage.height - 1,
+                        static_cast<int>((py - previewOffsetY) / previewScale));
+                    for (int px = startX; px < endX; ++px) {
+                        const int secondX = std::min(mergeSecondImage.width - 1,
+                            static_cast<int>((px - previewOffsetX) / previewScale));
+                        for (int k = 0; k < 3; ++k)
+                            mergePreview(px, py, k) = static_cast<unsigned char>(
+                                (static_cast<int>(mergePreview(px, py, k)) +
+                                 static_cast<int>(mergeSecondImage(secondX, secondY, k))) / 2);
+                    }
+                }
+                RenderImageFit(memDC, mergePreview, rectAfterArea);
+                RECT mergeRect = GetFittedImageRect(currentImage, rectAfterArea);
+                HPEN mergePen = CreatePen(PS_DASH, 2, RGB(255, 220, 80));
+                HPEN oldMergePen = (HPEN)SelectObject(memDC, mergePen);
+                HBRUSH oldMergeBrush = (HBRUSH)SelectObject(memDC, GetStockObject(NULL_BRUSH));
+                Rectangle(memDC, mergeRect.left, mergeRect.top, mergeRect.right, mergeRect.bottom);
+                SelectObject(memDC, oldMergeBrush);
+                SelectObject(memDC, oldMergePen);
+                DeleteObject(mergePen);
+            } else {
+                RenderImageFit(memDC, currentImage, rectAfterArea);
+            }
 
             if (freeCropMode) {
                 RECT imageRect = GetFittedImageRect(currentImage, rectAfterArea);
